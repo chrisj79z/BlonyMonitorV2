@@ -41,6 +41,15 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
+      - name: Stash runtime assets
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "build/bin/mabidata.db")) {
+            throw "build/bin/mabidata.db not found in repository"
+          }
+          New-Item -ItemType Directory -Force -Path .ci-assets | Out-Null
+          Copy-Item "build/bin/mabidata.db" ".ci-assets/mabidata.db"
+
       - name: Build application
         run: wails build -clean
         env:
@@ -54,7 +63,7 @@ jobs:
           $packageDir = "release-package"
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item "build/bin/BlonyMonitorV2.exe" $packageDir/
-          Copy-Item "build/bin/mabidata.db" $packageDir/
+          Copy-Item ".ci-assets/mabidata.db" $packageDir/
           Copy-Item -Recurse "sounds" $packageDir/
 
           if ("${{ github.ref }}".StartsWith("refs/tags/")) {
