@@ -333,7 +333,7 @@ func (a *App) processPacket(pkt *packet.GamePacket) {
 
 	switch pkt.Op {
 	case opcodeEntityAppear:
-entity, err := packet.ParseEntityAppearPacket(pkt.Msg)
+		entity, err := packet.ParseEntityAppearPacket(pkt.Msg)
 		if err != nil {
 			return
 		}
@@ -342,7 +342,7 @@ entity, err := packet.ParseEntityAppearPacket(pkt.Msg)
 		}
 
 	case opcodeEntitiesAppear:
-entities, err := packet.ParseEntitiesAppearPacket(pkt)
+		entities, err := packet.ParseEntitiesAppearPacket(pkt)
 		if err != nil {
 			return
 		}
@@ -353,13 +353,13 @@ entities, err := packet.ParseEntitiesAppearPacket(pkt)
 		}
 
 	case opcodeEntityProperty:
-a.handleEntityProperty(pkt)
+		a.handleEntityProperty(pkt)
 
 	case opcodeEntityRemove:
-a.clearBossHP(strconv.FormatUint(pkt.Id, 10))
+		a.clearBossHP(strconv.FormatUint(pkt.Id, 10))
 
 	case opcodeCombatAction:
-pack, err := packet.ParseCombatActionPackPacket(pkt)
+		pack, err := packet.ParseCombatActionPackPacket(pkt)
 		if err != nil {
 			return
 		}
@@ -390,7 +390,7 @@ pack, err := packet.ParseCombatActionPackPacket(pkt)
 		}
 
 	case opcodeEffectDamage:
-if len(pkt.Msg) < 7 {
+		if len(pkt.Msg) < 7 {
 			return
 		}
 		if pkt.Msg[0].Type() != packet.MessageElemTypeInt ||
@@ -413,7 +413,6 @@ if len(pkt.Msg) < 7 {
 		a.addDamage(attackerId, targetId, attackSkillId, float32(damage), false)
 
 	case opcodeEffectDelayed:
-// 延迟效果伤害
 		if len(pkt.Msg) < 7 {
 			return
 		}
@@ -441,7 +440,6 @@ if len(pkt.Msg) < 7 {
 		a.addDamage(attackerId, targetId, attackSkillId, float32(damage), false)
 
 	case opcodeConditionUpdate:
-// 状态更新
 		cond, err := packet.ParseCharacterConditionPacket(pkt)
 		if err != nil {
 			return
@@ -449,7 +447,6 @@ if len(pkt.Msg) < 7 {
 		a.addConditionEvent(cond.Id, cond.CCId, cond.IsEnable, cond.AttackerId, cond.DisableAt, cond.Duration)
 
 	case opcodeSetFinisher:
-// 击杀事件
 		if len(pkt.Msg) < 1 || pkt.Msg[0].Type() != packet.MessageElemTypeLong {
 			return
 		}
@@ -457,7 +454,6 @@ if len(pkt.Msg) < 7 {
 		a.addFinishEvent(pkt.Id, attackerId)
 
 	case opcodeDungeonInfo:
-// 地下城信息
 		dungeonInfo, err := ParseDungeonInfoPacket(pkt)
 		if err != nil {
 			logger.Printf("[Dungeon] 解析地下城信息失败: %v\n", err)
@@ -466,7 +462,6 @@ if len(pkt.Msg) < 7 {
 		a.onDungeonEnter(pkt, dungeonInfo)
 
 	case opcodeMapChange:
-// 地图切换
 		a.handleMapChange(pkt)
 
 	default:

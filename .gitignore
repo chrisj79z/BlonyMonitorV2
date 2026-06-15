@@ -4,6 +4,11 @@ node_modules/
 frontend/dist/
 frontend/dist.backup/
 frontend/wailsjs/
+old/
+backup/
+demo/
+local/
+dev_logs/
 *.log
 *.pcapng
 .idea/

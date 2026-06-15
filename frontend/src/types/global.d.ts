@@ -57,15 +57,6 @@ interface GoApp {
   SetWindowResizable(resizable: boolean): Promise<void>
   // 窗口隐藏
   Hide(): Promise<void>
-  // 开发模式 API
-  IsDevModeEnabled(): Promise<boolean>
-  SetDevMode(enabled: boolean): Promise<void>
-  GetDevMode(): Promise<boolean>
-  GetDevLogPath(): Promise<string>
-  GetDevOpcodeStats(): Promise<DevOpcodeStats[]>
-  GetKnownOpcodeStats(): Promise<KnownOpcodeInfo[]>
-  GetRecentDevPackets(limit: number): Promise<DevPacketRecord[]>
-  ClearDevStats(): Promise<void>
   // 地图 API
   GetCurrentMap(): Promise<CurrentMapInfo | null>
   GetCurrentDungeon(): Promise<DungeonInfo | null>
@@ -270,48 +261,6 @@ interface CreatureInfo {
   raceName?: string
   isPC: boolean
   isAlive: boolean
-}
-
-/**
- * 开发模式 opcode 统计类型
- */
-interface DevOpcodeStats {
-  op: string
-  opDecimal: number
-  count: number
-}
-
-/**
- * 已知 opcode 信息类型
- */
-interface KnownOpcodeInfo {
-  op: string
-  opDecimal: number
-  name: string
-  count: number
-}
-
-/**
- * 开发模式数据包记录类型
- */
-interface DevPacketRecord {
-  timestamp: string
-  op: string
-  opDecimal: number
-  entityId: string
-  elements: DevPacketElement[]
-  rawHex?: string
-  isKnown: boolean
-}
-
-/**
- * 开发模式数据包元素类型
- */
-interface DevPacketElement {
-  index: number
-  type: string
-  value: any
-  hexData?: string
 }
 
 /**
