@@ -5,10 +5,17 @@
  */
 
 import { computed } from 'vue'
+import SvgIcon from '@jamescoyle/vue-icon'
+import { mdiAlert } from '@mdi/js'
 import { useAppStore } from '../stores/app'
 
 // 获取应用状态
 const appStore = useAppStore()
+
+const selfLoadingHint =
+  '尚未识别到您的角色，战斗、Buff 等数据可能不准确。请切换地图（进入农场）或进入副本以完成识别。'
+
+const showSelfLoading = computed(() => appStore.isConnected && !appStore.selfInfo)
 
 /**
  * 连接状态样式类
@@ -103,6 +110,11 @@ const channelDisplayText = computed(() => {
 
     <!-- 玩家名称 -->
     <span v-if="appStore.selfInfo" class="status-item self-name">{{ appStore.selfInfo.name }}</span>
+    <span v-else-if="showSelfLoading" class="status-item self-loading">
+      <svg-icon type="mdi" :path="mdiAlert" :size="12" class="self-loading-icon" />
+      <span>角色加载中</span>
+      <div class="self-loading-popover" role="tooltip">{{ selfLoadingHint }}</div>
+    </span>
 
     <!-- 地图信息 -->
     <span v-if="mapDisplayText" class="status-item map-name">{{ mapDisplayText }}</span>
@@ -162,6 +174,73 @@ const channelDisplayText = computed(() => {
 .self-name {
   color: #4caf50;
   font-weight: 600;
+}
+
+.self-loading {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #ff9800;
+  font-weight: 600;
+  cursor: help;
+  z-index: 20;
+
+  &:hover {
+    z-index: 100000;
+  }
+}
+
+.self-loading-icon {
+  flex-shrink: 0;
+  color: #ff9800;
+}
+
+.self-loading-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: max-content;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: rgba(50, 50, 50, 0.98);
+  color: #eee;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s, visibility 0.2s;
+  z-index: 100000;
+
+  &::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 10px;
+    border: 5px solid transparent;
+    border-bottom-color: rgba(50, 50, 50, 0.98);
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 9px;
+    border: 6px solid transparent;
+    border-bottom-color: rgba(255, 152, 0, 0.35);
+    z-index: -1;
+  }
+}
+
+.self-loading:hover .self-loading-popover {
+  opacity: 1;
+  visibility: visible;
 }
 
 .status {
