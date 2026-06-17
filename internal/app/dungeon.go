@@ -119,7 +119,7 @@ func (a *App) onDungeonEnter(pkt *packet.GamePacket, info *DungeonInfo) {
 	currentMap := &CurrentMapInfo{
 		MapID:     int(info.DungeonID),
 		MapName:   dungeonLocalName,
-		LocalName: "???",
+		LocalName: "地下城",
 	}
 
 	a.setCurrentMap(currentMap)
