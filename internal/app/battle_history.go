@@ -93,6 +93,266 @@ func cloneSortedBossHPRecords(records []BossHPRecord) []BossHPRecord {
 	return result
 }
 
+func filterHitRecordsSince(records []SkillHitRecord, sinceSeq int64) []SkillHitRecord {
+	if sinceSeq <= 0 {
+		return cloneSortedSkillHitRecords(records)
+	}
+	filtered := make([]SkillHitRecord, 0, len(records))
+	for _, r := range records {
+		if r.Seq > sinceSeq {
+			filtered = append(filtered, r)
+		}
+	}
+	return cloneSortedSkillHitRecords(filtered)
+}
+
+func aggregateHitRecords(records []SkillHitRecord) (total float64, hits, crits int, min, max, critMin, critMax float64, firstHit, lastHit int64) {
+	for i, r := range records {
+		total += r.Damage
+		hits++
+		if i == 0 {
+			min, max = r.Damage, r.Damage
+			firstHit, lastHit = r.Timestamp, r.Timestamp
+		} else {
+			if r.Damage < min {
+				min = r.Damage
+			}
+			if r.Damage > max {
+				max = r.Damage
+			}
+			if r.Timestamp < firstHit {
+				firstHit = r.Timestamp
+			}
+			if r.Timestamp > lastHit {
+				lastHit = r.Timestamp
+			}
+		}
+		if r.IsCritical {
+			crits++
+			if crits == 1 || r.Damage < critMin {
+				critMin = r.Damage
+			}
+			if r.Damage > critMax {
+				critMax = r.Damage
+			}
+		}
+	}
+	return total, hits, crits, min, max, critMin, critMax, firstHit, lastHit
+}
+
+func filterBossHPHistorySince(records []BossHPRecord, sinceSeq int64, segmentStart int64) []BossHPRecord {
+	if len(records) == 0 {
+		return nil
+	}
+	filtered := make([]BossHPRecord, 0, len(records))
+	for _, r := range records {
+		if sinceSeq > 0 {
+			if r.DamageSeq > 0 {
+				if r.DamageSeq <= sinceSeq {
+					continue
+				}
+			} else if segmentStart > 0 && r.HpTimestamp < segmentStart {
+				continue
+			}
+		}
+		filtered = append(filtered, r)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return cloneSortedBossHPRecords(filtered)
+}
+
+// buildTargetExportSince 仅导出 sinceSeq 之后新增的伤害记录（用于历史分段保存，不影响实时统计）。
+func (a *App) buildTargetExportSince(sinceSeq int64) []targetExport {
+	if len(a.takenStats) == 0 {
+		return nil
+	}
+
+	now := time.Now().Unix()
+	result := make([]targetExport, 0, len(a.takenStats))
+
+	for id, stat := range a.takenStats {
+		attackers := make([]attackerExport, 0)
+		var targetTotal float64
+		var targetFirstHit, targetLastHit int64
+		hasTargetHits := false
+
+		for attackerID, attackerStat := range stat.attackers {
+			skills := make([]skillExport, 0)
+			var attackerTotal float64
+			var attackerFirstHit, attackerLastHit int64
+			hasAttackerHits := false
+
+			for skillID, skillStat := range attackerStat.skills {
+				segmentRecords := filterHitRecordsSince(skillStat.records, sinceSeq)
+				if len(segmentRecords) == 0 {
+					continue
+				}
+				total, hits, crits, min, max, critMin, critMax, firstHit, lastHit := aggregateHitRecords(segmentRecords)
+				attackerTotal += total
+				if !hasAttackerHits {
+					attackerFirstHit, attackerLastHit = firstHit, lastHit
+					hasAttackerHits = true
+				} else {
+					if firstHit < attackerFirstHit {
+						attackerFirstHit = firstHit
+					}
+					if lastHit > attackerLastHit {
+						attackerLastHit = lastHit
+					}
+				}
+
+				avgDamage := 0.0
+				if hits > 0 {
+					avgDamage = total / float64(hits)
+				}
+				skills = append(skills, skillExport{
+					SkillDamageStats: SkillDamageStats{
+						SkillID:       skillID,
+						SkillName:     a.getSkillNameUnsafe(skillID),
+						TotalDamage:   total,
+						HitCount:      hits,
+						CritCount:     crits,
+						AvgDamage:     avgDamage,
+						MinDamage:     min,
+						MaxDamage:     max,
+						CritMinDamage: critMin,
+						CritMaxDamage: critMax,
+					},
+					HitRecords: segmentRecords,
+				})
+			}
+
+			if !hasAttackerHits {
+				continue
+			}
+
+			for i := range skills {
+				if attackerTotal > 0 {
+					skills[i].Percent = (skills[i].TotalDamage / attackerTotal) * 100
+				}
+			}
+
+			sort.Slice(skills, func(i, j int) bool {
+				if skills[i].TotalDamage != skills[j].TotalDamage {
+					return skills[i].TotalDamage > skills[j].TotalDamage
+				}
+				return skills[i].SkillID < skills[j].SkillID
+			})
+
+			skillStatsOnly := make([]SkillDamageStats, len(skills))
+			for i, s := range skills {
+				skillStatsOnly[i] = s.SkillDamageStats
+			}
+
+			targetTotal += attackerTotal
+			if !hasTargetHits {
+				targetFirstHit, targetLastHit = attackerFirstHit, attackerLastHit
+				hasTargetHits = true
+			} else {
+				if attackerFirstHit < targetFirstHit {
+					targetFirstHit = attackerFirstHit
+				}
+				if attackerLastHit > targetLastHit {
+					targetLastHit = attackerLastHit
+				}
+			}
+
+			attackers = append(attackers, attackerExport{
+				AttackerWithSkills: AttackerWithSkills{
+					ID:          attackerID,
+					Name:        formatDisplayName(attackerID, attackerStat.name, attackerStat.raceId, attackerStat.isPC),
+					TotalDamage: attackerTotal,
+					IsPC:        attackerStat.isPC,
+					Skills:      skillStatsOnly,
+				},
+				SkillsDetail: skills,
+			})
+		}
+
+		if !hasTargetHits {
+			continue
+		}
+
+		for i := range attackers {
+			percent := 0.0
+			if targetTotal > 0 {
+				percent = (attackers[i].TotalDamage / targetTotal) * 100
+			}
+			attackers[i].Percent = percent
+		}
+
+		sort.Slice(attackers, func(i, j int) bool {
+			if attackers[i].TotalDamage != attackers[j].TotalDamage {
+				return attackers[i].TotalDamage > attackers[j].TotalDamage
+			}
+			return attackers[i].ID < attackers[j].ID
+		})
+
+		endTime := targetLastHit
+		deathTime := int64(0)
+		if stat.deathTime > 0 && stat.deathTime >= targetFirstHit {
+			endTime = stat.deathTime
+			deathTime = stat.deathTime
+		}
+		duration := endTime - targetFirstHit
+		if duration < 1 {
+			duration = 1
+		}
+		targetDps := targetTotal / float64(duration)
+		for i := range attackers {
+			attackers[i].DPS = attackers[i].TotalDamage / float64(duration)
+		}
+
+		var targetBossHP *BossHPExport
+		if records, ok := a.bossHPHistory[id]; ok && len(records) > 0 {
+			historyCopy := filterBossHPHistorySince(records, sinceSeq, targetFirstHit)
+			if len(historyCopy) > 0 {
+				maxHp := 0.0
+				raceID := 0
+				if info := a.bossHP[id]; info != nil {
+					maxHp = info.MaxHP
+					raceID = info.RaceID
+				} else {
+					maxHp = historyCopy[len(historyCopy)-1].MaxHP
+					raceID = historyCopy[len(historyCopy)-1].RaceID
+				}
+				if maxHp > 0 {
+					targetBossHP = &BossHPExport{
+						EntityID: id,
+						RaceID:   raceID,
+						MaxHP:    maxHp,
+						History:  historyCopy,
+					}
+				}
+			}
+		}
+
+		result = append(result, targetExport{
+			TargetID:    id,
+			TargetName:  formatDisplayName(id, stat.name, stat.raceId, stat.isPC),
+			TotalDamage: targetTotal,
+			DPS:         targetDps,
+			Duration:    duration,
+			Attackers:   attackers,
+			CleanedAt:   now,
+			AppearedAt:  targetFirstHit,
+			DeathTime:   deathTime,
+			BossHP:      targetBossHP,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].TotalDamage != result[j].TotalDamage {
+			return result[i].TotalDamage > result[j].TotalDamage
+		}
+		return result[i].TargetID < result[j].TargetID
+	})
+
+	return result
+}
+
 func (a *App) buildTargetExport() []targetExport {
 	if len(a.takenStats) == 0 {
 		return nil
@@ -235,6 +495,12 @@ func (a *App) buildTargetExport() []targetExport {
 	})
 
 	return result
+}
+
+func (a *App) buildSaveFileDataSince(sinceSeq int64) SaveFileData {
+	return SaveFileData{
+		Targets: a.buildTargetExportSince(sinceSeq),
+	}
 }
 
 func (a *App) buildSaveFileData() SaveFileData {
@@ -392,8 +658,8 @@ func (a *App) resolveSaveName(mapName string) string {
 	return "战斗记录"
 }
 
-func (a *App) saveTakenStatsLocked(saveName string) (string, int, int, error) {
-	saveData := a.buildSaveFileData()
+func (a *App) saveTakenStatsLocked(saveName string, sinceSeq int64) (string, int, int, error) {
+	saveData := a.buildSaveFileDataSince(sinceSeq)
 	if len(saveData.Targets) == 0 {
 		return "", 0, 0, nil
 	}
@@ -439,7 +705,7 @@ func (a *App) clearDamageStateUnsafe() {
 	a.clearAllBossHPUnsafe()
 }
 
-// cleanupAndSaveTakenStats 场景/副本切换时保存战斗记录，但不清空内存中的统计数据。
+// cleanupAndSaveTakenStats 场景/副本切换时保存本场新增的战斗记录，保留实时统计供造成伤害/受到伤害页面展示。
 func (a *App) cleanupAndSaveTakenStats(mapID int, mapName string) {
 	a.mu.RLock()
 	oldMapID := 0
@@ -482,7 +748,8 @@ func (a *App) cleanupAndSaveTakenStats(mapID int, mapName string) {
 		}
 	}
 
-	finalPath, targetCount, bossHPCount, err := a.saveTakenStatsLocked(saveName)
+	sinceSeq := a.damageSeqAtLastAutoSave
+	finalPath, targetCount, bossHPCount, err := a.saveTakenStatsLocked(saveName, sinceSeq)
 	if err != nil {
 		logger.Printf("[Cleanup] 保存失败: %v\n", err)
 		return
@@ -492,10 +759,10 @@ func (a *App) cleanupAndSaveTakenStats(mapID int, mapName string) {
 	}
 
 	a.damageSeqAtLastAutoSave = a.damageSeq
-	logger.Printf("[Cleanup] 地图切换保存 %d 个目标, %d 个bossHP -> %s（保留当前统计）\n", targetCount, bossHPCount, finalPath)
+	logger.Printf("[Cleanup] 地图切换保存 %d 个目标, %d 个bossHP -> %s（保留实时统计）\n", targetCount, bossHPCount, finalPath)
 }
 
-// ClearAndSave 保存并清空数据（供前端调用）。
+// ClearAndSave 清空实时数据；仅保存尚未写入历史的部分，已自动保存过的不再重复保存。
 func (a *App) ClearAndSave() {
 	a.mu.Lock()
 
@@ -507,17 +774,25 @@ func (a *App) ClearAndSave() {
 		return
 	}
 
-	saveName := a.resolveSaveName("手动保存")
-	finalPath, targetCount, bossHPCount, err := a.saveTakenStatsLocked(saveName)
-	if err != nil {
-		logger.Printf("[ClearAndSave] 保存失败: %v\n", err)
-		a.mu.Unlock()
-		return
+	sinceSeq := a.damageSeqAtLastAutoSave
+	if a.damageSeq != sinceSeq {
+		saveName := a.resolveSaveName("手动保存")
+		if sinceSeq == 0 {
+			a.capAllDeadTargetDamageToMaxHPUnsafe()
+		}
+		finalPath, targetCount, bossHPCount, err := a.saveTakenStatsLocked(saveName, sinceSeq)
+		if err != nil {
+			logger.Printf("[ClearAndSave] 保存失败: %v\n", err)
+			a.mu.Unlock()
+			return
+		}
+		if finalPath != "" {
+			logger.Printf("[ClearAndSave] 保存 %d 个目标, %d 个bossHP -> %s\n", targetCount, bossHPCount, finalPath)
+		}
+	} else {
+		logger.Printf("[ClearAndSave] 数据已保存过，跳过重复保存\n")
 	}
 
-	if finalPath != "" {
-		logger.Printf("[ClearAndSave] 保存 %d 个目标, %d 个bossHP -> %s\n", targetCount, bossHPCount, finalPath)
-	}
 	a.eventLogs = make([]EventLog, 0)
 	a.clearDamageStateUnsafe()
 	a.mu.Unlock()
@@ -534,7 +809,8 @@ func (a *App) shutdownSaveData() {
 	}
 
 	saveName := a.resolveSaveName("退出保存")
-	finalPath, targetCount, bossHPCount, err := a.saveTakenStatsLocked(saveName)
+	sinceSeq := a.damageSeqAtLastAutoSave
+	finalPath, targetCount, bossHPCount, err := a.saveTakenStatsLocked(saveName, sinceSeq)
 	if err != nil {
 		logger.Printf("[Shutdown] 保存失败: %v\n", err)
 		return
