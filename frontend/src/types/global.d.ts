@@ -435,6 +435,7 @@ interface BuffDisplayInfo {
   entityName: string
   remainingTime: number
   totalTime: number
+  notifyThreshold: number
   willNotify: boolean
 }
 

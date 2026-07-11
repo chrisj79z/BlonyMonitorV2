@@ -36,7 +36,7 @@ async function toggleSound(buff: BuffDisplayInfo, enabled: boolean) {
     if (!enabled) {
       buff.willNotify = false
     } else if (buff.isActive) {
-      buff.willNotify = buff.remainingTime > 30
+      buff.willNotify = buff.remainingTime > (buff.notifyThreshold ?? 30)
     }
   } catch (error) {
     console.error('设置声音开关失败:', error)
