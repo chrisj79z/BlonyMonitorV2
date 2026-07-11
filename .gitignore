@@ -11,6 +11,8 @@ backup/
 demo/
 local/
 dev_logs/
+.env
+internal/config/.env
 *.log
 *.pcapng
 .idea/

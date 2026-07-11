@@ -631,6 +631,7 @@ func (a *App) saveTakenStatsLocked(saveName string, sinceSeq int64) (string, int
 		return "", 0, 0, err
 	}
 	a.emitHistorySaved(finalPath)
+	a.scheduleBattleUpload(saveData, finalPath, saveName)
 	return finalPath, len(saveData.Targets), countBossHPTargets(saveData.Targets), nil
 }
 

@@ -92,6 +92,8 @@ interface GoApp {
   GetNpcapStatus(): Promise<NpcapStatus>
   OpenNpcapDownloadPage(): Promise<void>
   RecheckNpcap(): Promise<NpcapStatus>
+  GetUploadSettings(): Promise<UploadSettings>
+  SetUploadSettings(settings: UploadSettings): Promise<void>
 }
 
 /**
@@ -482,6 +484,13 @@ interface BattleUploadSummary {
   effectiveDamage: number
   rawDamage: number
   overflowDamage: number
+}
+
+interface UploadSettings {
+  enabled: boolean
+  endpoint: string
+  dungeonKeyword: string
+  secretReady: boolean
 }
 
 interface BattleReportPayload {

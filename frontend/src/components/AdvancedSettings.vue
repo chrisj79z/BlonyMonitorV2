@@ -6,7 +6,7 @@
  */
 
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
-import { GetAllNics, GetManualNic, SetManualNic, GetAccelerators, GetSelectedAccelerator, SetAccelerator } from '../../wailsjs/go/app/App'
+import { GetAllNics, GetManualNic, SetManualNic, GetAccelerators, GetSelectedAccelerator, SetAccelerator, GetUploadSettings, SetUploadSettings } from '../../wailsjs/go/app/App'
 import { useAppStore } from '../stores/app'
 
 // 定义 props
@@ -44,6 +44,10 @@ const selectedAccelerator = ref('')
 const channelDropdownVisible = ref(false)
 const acceleratorDropdownVisible = ref(false)
 
+// 战斗数据推送
+const uploadEnabled = ref(false)
+const uploadSecretReady = ref(false)
+
 /**
  * 加载网卡列表
  */
@@ -78,6 +82,38 @@ async function handleOpacityChange(event: Event) {
   const newOpacity = parseInt(target.value, 10)
   opacity.value = newOpacity
   await appStore.setOpacity(newOpacity)
+}
+
+/**
+ * 加载战斗数据推送设置
+ */
+async function loadUploadSettings() {
+  try {
+    const settings = await GetUploadSettings()
+    uploadEnabled.value = settings.enabled
+    uploadSecretReady.value = settings.secretReady
+  } catch (err) {
+    console.error('加载推送设置失败:', err)
+  }
+}
+
+async function saveUploadSettings() {
+  try {
+    await SetUploadSettings({
+      enabled: uploadEnabled.value,
+      endpoint: '',
+      dungeonKeyword: '',
+      secretReady: uploadSecretReady.value,
+    })
+  } catch (err) {
+    console.error('保存推送设置失败:', err)
+  }
+}
+
+async function handleUploadEnabledChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  uploadEnabled.value = target.checked
+  await saveUploadSettings()
 }
 
 /**
@@ -275,6 +311,7 @@ watch(() => props.visible, (newVal) => {
     loadNics()
     loadOpacity()
     loadChannelSettings()
+    loadUploadSettings()
     if (acceleratorMode.value) {
       loadAccelerators()
     }
@@ -415,6 +452,30 @@ watch(() => props.visible, (newVal) => {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- 分割线 -->
+        <div class="setting-divider"></div>
+
+        <!-- 战斗数据推送 -->
+        <div class="setting-section">
+          <div class="section-header">
+            <h4>战斗数据推送</h4>
+            <van-tag :type="uploadSecretReady ? 'success' : 'warning'" plain>
+              {{ uploadSecretReady ? '密钥已配置' : '密钥未配置' }}
+            </van-tag>
+          </div>
+
+          <div class="auto-detect-control">
+            <label class="auto-detect-label">
+              <input
+                type="checkbox"
+                :checked="uploadEnabled"
+                @change="handleUploadEnabledChange"
+              >
+              <span>启用推送</span>
+            </label>
           </div>
         </div>
 

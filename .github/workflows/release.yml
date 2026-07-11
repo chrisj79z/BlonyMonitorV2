@@ -61,9 +61,29 @@ jobs:
           Copy-Item "build/bin/mabidata.db" ".ci-assets/mabidata.db"
 
       - name: Build application
-        run: wails build -clean
+        shell: pwsh
         env:
           CGO_ENABLED: 0
+          BLONY_UPLOAD_SECRET: ${{ secrets.BLONY_UPLOAD_SECRET }}
+          BLONY_UPLOAD_ENDPOINT: ${{ vars.BLONY_UPLOAD_ENDPOINT }}
+          BLONY_UPLOAD_DUNGEON_KEYWORD: ${{ vars.BLONY_UPLOAD_DUNGEON_KEYWORD }}
+          BLONY_UPLOAD_ENABLED: ${{ vars.BLONY_UPLOAD_ENABLED }}
+        run: |
+          $ldflags = @('-s', '-w')
+          if ($env:BLONY_UPLOAD_SECRET) {
+            $secretB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($env:BLONY_UPLOAD_SECRET))
+            $ldflags += "-X blonymonitorv2/internal/config.uploadSecretInjectB64=$secretB64"
+          }
+          if ($env:BLONY_UPLOAD_ENDPOINT) {
+            $ldflags += "-X blonymonitorv2/internal/config.uploadEndpointInject=$($env:BLONY_UPLOAD_ENDPOINT)"
+          }
+          if ($env:BLONY_UPLOAD_DUNGEON_KEYWORD) {
+            $ldflags += "-X blonymonitorv2/internal/config.uploadDungeonKeywordInject=$($env:BLONY_UPLOAD_DUNGEON_KEYWORD)"
+          }
+          if ($env:BLONY_UPLOAD_ENABLED) {
+            $ldflags += "-X blonymonitorv2/internal/config.uploadEnabledInject=$($env:BLONY_UPLOAD_ENABLED)"
+          }
+          wails build -clean -ldflags ($ldflags -join ' ')
 
       - name: Package release
         id: package
