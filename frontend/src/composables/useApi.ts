@@ -515,9 +515,14 @@ export function onEvent(eventName: string, callback: (...args: any[]) => void): 
 /**
  * 取消事件监听
  * @param eventName 事件名称
+ * @param callback 可选，仅移除指定回调；不传则移除该事件全部监听
  */
-export function offEvent(eventName: string): void {
+export function offEvent(eventName: string, callback?: (...args: any[]) => void): void {
   if (!isWailsReady()) return
+  if (callback) {
+    window.runtime.EventsOff(eventName, callback)
+    return
+  }
   window.runtime.EventsOff(eventName)
 }
 

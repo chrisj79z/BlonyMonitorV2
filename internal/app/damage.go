@@ -251,10 +251,10 @@ func (a *App) addDamage(attackerId, targetId uint64, skillId uint16, damage floa
 
 // GetDamageByAttacker 获取按攻击者分组的伤害统计
 func (a *App) GetDamageByAttacker() []DamageStats {
+	exportDamage := a.getExportDamage()
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-
-	exportDamage := a.computeExportDamageBySeqUnsafe()
 	adjustedTotal := a.aggregateAdjustedPCDamageUnsafe(exportDamage)
 
 	result := make([]DamageStats, 0)
@@ -301,10 +301,10 @@ func (a *App) GetDamageByAttacker() []DamageStats {
 
 // GetDamageBySkill 获取按技能分组的伤害统计
 func (a *App) GetDamageBySkill() []AttackerWithSkills {
+	exportDamage := a.getExportDamage()
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-
-	exportDamage := a.computeExportDamageBySeqUnsafe()
 	adjustedTotal := a.aggregateAdjustedPCDamageUnsafe(exportDamage)
 
 	result := make([]AttackerWithSkills, 0)
@@ -379,10 +379,10 @@ func (a *App) GetDamageBySkill() []AttackerWithSkills {
 
 // GetDamageTaken 获取受到伤害统计
 func (a *App) GetDamageTaken() []TargetDamageStats {
+	exportDamage := a.getExportDamage()
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-
-	exportDamage := a.computeExportDamageBySeqUnsafe()
 
 	result := make([]TargetDamageStats, 0)
 	now := nowCentiseconds()

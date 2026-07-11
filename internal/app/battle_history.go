@@ -661,6 +661,7 @@ func (a *App) clearDamageStateUnsafe() {
 	a.targetChartAggData = make(map[string]map[string]*chartAttackerData)
 	a.damageSeqAtLastAutoSave = 0
 	a.clearAllBossHPUnsafe()
+	a.invalidateExportDamageCache()
 }
 
 // cleanupAndSaveTakenStats 场景/副本切换时保存本场新增的战斗记录，保留实时统计供造成伤害/受到伤害页面展示。

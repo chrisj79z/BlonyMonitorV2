@@ -165,6 +165,7 @@ func (a *App) handleEntityProperty(pkt *packet.GamePacket) {
 		}
 	}
 	a.clearInactiveBossHPLockPlatformUnsafe(id, currentHP, percent)
+	a.markExportDamageDirty()
 	a.mu.Unlock()
 }
 

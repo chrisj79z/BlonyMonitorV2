@@ -101,10 +101,8 @@ const throttledUpdateView = throttle(updateView, 200)
 onMounted(async () => {
   updateView()
 
-  // 监听后端的 DPS 更新事件（使用节流）
   api.onEvent('dps-update', throttledUpdateView)
 
-  // 监听清理事件
   api.onEvent('clear', () => {
     stats.value = []
   })
@@ -114,8 +112,7 @@ onUnmounted(() => {
   if (updateInterval) {
     clearInterval(updateInterval)
   }
-  // 取消事件监听
-  api.offEvent('dps-update')
+  api.offEvent('dps-update', throttledUpdateView)
   api.offEvent('clear')
 })
 </script>

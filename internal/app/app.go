@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"blonymonitorv2/db"
 	"blonymonitorv2/internal/config"
@@ -75,6 +76,10 @@ type App struct {
 	attackerTimerMgr            *AttackerTimerManager
 	targetTimerMgr              *TargetTimerManager
 	dpsUpdateThrottler          *DPSUpdateThrottler
+	exportDamageMu              sync.Mutex
+	exportDamageCache           map[int64]float64
+	exportDamageDirty           bool
+	exportDamageBuiltAt         time.Time
 	autoDetect                  bool
 	selectedChannel             int
 	captureCancel               context.CancelFunc

@@ -1,6 +1,121 @@
 package app
 
-import "math"
+import (
+	"math"
+	"time"
+)
+
+const exportDamageCacheMinInterval = 400 * time.Millisecond
+
+func (a *App) markExportDamageDirty() {
+	a.exportDamageMu.Lock()
+	a.exportDamageDirty = true
+	a.exportDamageMu.Unlock()
+}
+
+func (a *App) invalidateExportDamageCache() {
+	a.exportDamageMu.Lock()
+	a.exportDamageCache = nil
+	a.exportDamageDirty = true
+	a.exportDamageMu.Unlock()
+}
+
+// getExportDamage 返回 Boss HP 溢出修正后的 seq→伤害映射；带缓存，避免每次 API 全量重放。
+func (a *App) getExportDamage() map[int64]float64 {
+	a.exportDamageMu.Lock()
+	now := time.Now()
+	if a.exportDamageCache != nil && !a.exportDamageDirty && now.Sub(a.exportDamageBuiltAt) < exportDamageCacheMinInterval {
+		cache := a.exportDamageCache
+		a.exportDamageMu.Unlock()
+		return cache
+	}
+	a.exportDamageMu.Unlock()
+
+	a.mu.RLock()
+	targetDamages := cloneTargetDamagesMap(a.targetDamages)
+	bossHPHistory := cloneBossHPHistoryMap(a.bossHPHistory)
+	bossHPMax := snapshotBossHPMaxUnsafe(a.bossHP, a.bossHPHistory)
+	a.mu.RUnlock()
+
+	cache := computeExportDamageOnSnapshot(targetDamages, bossHPHistory, bossHPMax)
+
+	a.exportDamageMu.Lock()
+	a.exportDamageCache = cache
+	a.exportDamageDirty = false
+	a.exportDamageBuiltAt = time.Now()
+	a.exportDamageMu.Unlock()
+	return cache
+}
+
+func cloneBossHPHistoryMap(src map[string][]BossHPRecord) map[string][]BossHPRecord {
+	dst := make(map[string][]BossHPRecord, len(src))
+	for id, records := range src {
+		copied := make([]BossHPRecord, len(records))
+		copy(copied, records)
+		dst[id] = copied
+	}
+	return dst
+}
+
+func snapshotBossHPMaxUnsafe(bossHP map[string]*BossHPInfo, bossHPHistory map[string][]BossHPRecord) map[string]float64 {
+	maxMap := make(map[string]float64, len(bossHP)+len(bossHPHistory))
+	for id, hp := range bossHP {
+		if hp != nil && hp.MaxHP > 0 {
+			maxMap[id] = hp.MaxHP
+		}
+	}
+	for id, history := range bossHPHistory {
+		if maxMap[id] > 0 || len(history) == 0 {
+			continue
+		}
+		maxMap[id] = history[len(history)-1].MaxHP
+	}
+	return maxMap
+}
+
+func effectiveRecordDamage(r SkillHitRecord, exportDamage map[int64]float64) float64 {
+	if r.Seq > 0 {
+		if dmg, ok := exportDamage[r.Seq]; ok {
+			return dmg
+		}
+	}
+	return r.Damage
+}
+
+func aggregateHitRecordsFast(records []SkillHitRecord, exportDamage map[int64]float64) (total float64, hits, crits int, min, max, critMin, critMax float64, firstHit, lastHit int64) {
+	for i, r := range records {
+		dmg := effectiveRecordDamage(r, exportDamage)
+		total += dmg
+		hits++
+		if i == 0 {
+			min, max = dmg, dmg
+			firstHit, lastHit = r.Timestamp, r.Timestamp
+		} else {
+			if dmg < min {
+				min = dmg
+			}
+			if dmg > max {
+				max = dmg
+			}
+			if r.Timestamp < firstHit {
+				firstHit = r.Timestamp
+			}
+			if r.Timestamp > lastHit {
+				lastHit = r.Timestamp
+			}
+		}
+		if r.IsCritical {
+			crits++
+			if crits == 1 || dmg < critMin {
+				critMin = dmg
+			}
+			if dmg > critMax {
+				critMax = dmg
+			}
+		}
+	}
+	return total, hits, crits, min, max, critMin, critMax, firstHit, lastHit
+}
 
 func (a *App) adjustBossDamageOverflowUnsafe(targetIdStr string, fromSeq, toSeq int64, hpDelta float64, lockThreshold float64, markLockTrigger bool, maxHP float64) bossDamageOverflowAdjustResult {
 	result := bossDamageOverflowAdjustResult{LockThreshold: lockThreshold}
@@ -46,7 +161,7 @@ func (a *App) adjustBossDamageOverflowUnsafe(targetIdStr string, fromSeq, toSeq 
 	return result
 }
 
-func (a *App) adjustBossDamageOverflowOnClone(records []DamageRecord, fromSeq, toSeq int64, hpDelta float64, lockThreshold float64, markLockTrigger bool, maxHP float64) {
+func adjustBossDamageOverflowOnClone(records []DamageRecord, fromSeq, toSeq int64, hpDelta float64, lockThreshold float64, markLockTrigger bool, maxHP float64) {
 	if hpDelta < 0 || toSeq <= fromSeq || len(records) == 0 {
 		return
 	}
@@ -308,10 +423,9 @@ func capTargetDamageRecordsToMaxHP(records []DamageRecord, maxHP float64) {
 	}
 }
 
-// computeExportDamageBySeqUnsafe 重放 Boss HP 时间线并修正伤害，供历史导出与实时统计展示共用。
-func (a *App) computeExportDamageBySeqUnsafe() map[int64]float64 {
-	cloned := cloneTargetDamagesMap(a.targetDamages)
-	for targetID, history := range a.bossHPHistory {
+// computeExportDamageOnSnapshot 在数据快照上重放 Boss HP 时间线并修正伤害。
+func computeExportDamageOnSnapshot(cloned map[string][]DamageRecord, bossHPHistory map[string][]BossHPRecord, bossHPMax map[string]float64) map[int64]float64 {
+	for targetID, history := range bossHPHistory {
 		records := cloned[targetID]
 		if len(records) == 0 || len(history) < 2 {
 			continue
@@ -326,7 +440,7 @@ func (a *App) computeExportDamageBySeqUnsafe() map[int64]float64 {
 				continue
 			}
 			lockThreshold := getPotentialBossHPLockThreshold(curr.CurrentHP, curr.Percent, prev.Percent)
-			a.adjustBossDamageOverflowOnClone(
+			adjustBossDamageOverflowOnClone(
 				records,
 				fromSeq,
 				toSeq,
@@ -336,12 +450,7 @@ func (a *App) computeExportDamageBySeqUnsafe() map[int64]float64 {
 				curr.MaxHP,
 			)
 		}
-		maxHP := 0.0
-		if hp := a.bossHP[targetID]; hp != nil && hp.MaxHP > 0 {
-			maxHP = hp.MaxHP
-		} else if len(history) > 0 {
-			maxHP = history[len(history)-1].MaxHP
-		}
+		maxHP := bossHPMax[targetID]
 		last := history[len(history)-1]
 		if last.CurrentHP <= bossDamageAdjustEpsilon && maxHP > 0 {
 			capTargetDamageRecordsToMaxHP(records, maxHP)
@@ -355,6 +464,15 @@ func (a *App) computeExportDamageBySeqUnsafe() map[int64]float64 {
 		}
 	}
 	return exportDamage
+}
+
+// computeExportDamageBySeqUnsafe 在持锁上下文内计算导出伤害（用于历史保存）。
+func (a *App) computeExportDamageBySeqUnsafe() map[int64]float64 {
+	return computeExportDamageOnSnapshot(
+		cloneTargetDamagesMap(a.targetDamages),
+		a.bossHPHistory,
+		snapshotBossHPMaxUnsafe(a.bossHP, a.bossHPHistory),
+	)
 }
 
 func applyExportDamageToHitRecords(records []SkillHitRecord, exportDamage map[int64]float64) []SkillHitRecord {
@@ -378,8 +496,7 @@ func applyExportDamageToHitRecords(records []SkillHitRecord, exportDamage map[in
 }
 
 func aggregateHitRecordsWithExport(records []SkillHitRecord, exportDamage map[int64]float64) (total float64, hits, crits int, min, max, critMin, critMax float64, firstHit, lastHit int64) {
-	adjusted := applyExportDamageToHitRecords(records, exportDamage)
-	return aggregateHitRecords(adjusted)
+	return aggregateHitRecordsFast(records, exportDamage)
 }
 
 func (a *App) buildSkillDamageStatsFromRecordsUnsafe(skillID int, records []SkillHitRecord, exportDamage map[int64]float64, parentTotal float64) SkillDamageStats {

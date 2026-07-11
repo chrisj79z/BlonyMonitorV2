@@ -197,6 +197,9 @@ func (m *AttackerTimerManager) OnAttack(attackerId string) {
 		m.mu.Unlock()
 		timer.Reset()
 	}
+	if m.app.dpsUpdateThrottler != nil {
+		m.app.dpsUpdateThrottler.RequestUpdate()
+	}
 }
 
 // removeTimer 移除计时器
@@ -340,30 +343,32 @@ func (m *TargetTimerManager) OnHit(targetId string) {
 	timer := m.timers[targetId]
 
 	if timer == nil {
-		// 创建新计时器
 		timer = m.createTargetTimer(targetId)
 		m.timers[targetId] = timer
 		m.mu.Unlock()
 		timer.Start()
+		if m.app.dpsUpdateThrottler != nil {
+			m.app.dpsUpdateThrottler.RequestUpdate()
+		}
 		return
 	}
 
-	// 检查计时器是否还在运行
 	timer.mu.Lock()
 	isRunning := timer.isRunning
 	timer.mu.Unlock()
 
 	if !isRunning {
-		// 计时器已停止，删除旧的，创建新的
 		delete(m.timers, targetId)
 		timer = m.createTargetTimer(targetId)
 		m.timers[targetId] = timer
 		m.mu.Unlock()
 		timer.Start()
 	} else {
-		// 计时器还在运行，重置时间
 		m.mu.Unlock()
 		timer.Reset()
+	}
+	if m.app.dpsUpdateThrottler != nil {
+		m.app.dpsUpdateThrottler.RequestUpdate()
 	}
 }
 
