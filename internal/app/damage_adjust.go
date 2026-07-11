@@ -308,7 +308,7 @@ func capTargetDamageRecordsToMaxHP(records []DamageRecord, maxHP float64) {
 	}
 }
 
-// computeExportDamageBySeqUnsafe 在历史导出时重放 Boss HP 时间线并修正伤害，不影响实时统计。
+// computeExportDamageBySeqUnsafe 重放 Boss HP 时间线并修正伤害，供历史导出与实时统计展示共用。
 func (a *App) computeExportDamageBySeqUnsafe() map[int64]float64 {
 	cloned := cloneTargetDamagesMap(a.targetDamages)
 	for targetID, history := range a.bossHPHistory {
@@ -380,6 +380,78 @@ func applyExportDamageToHitRecords(records []SkillHitRecord, exportDamage map[in
 func aggregateHitRecordsWithExport(records []SkillHitRecord, exportDamage map[int64]float64) (total float64, hits, crits int, min, max, critMin, critMax float64, firstHit, lastHit int64) {
 	adjusted := applyExportDamageToHitRecords(records, exportDamage)
 	return aggregateHitRecords(adjusted)
+}
+
+func (a *App) buildSkillDamageStatsFromRecordsUnsafe(skillID int, records []SkillHitRecord, exportDamage map[int64]float64, parentTotal float64) SkillDamageStats {
+	total, hits, crits, min, max, critMin, critMax, _, _ := aggregateHitRecordsWithExport(records, exportDamage)
+	avgDamage := 0.0
+	if hits > 0 {
+		avgDamage = total / float64(hits)
+	}
+	percent := 0.0
+	if parentTotal > 0 {
+		percent = (total / parentTotal) * 100
+	}
+	return SkillDamageStats{
+		SkillID:       skillID,
+		SkillName:     a.getSkillNameUnsafe(skillID),
+		TotalDamage:   total,
+		Percent:       percent,
+		HitCount:      hits,
+		CritCount:     crits,
+		AvgDamage:     avgDamage,
+		MinDamage:     min,
+		MaxDamage:     max,
+		CritMinDamage: critMin,
+		CritMaxDamage: critMax,
+	}
+}
+
+func (a *App) aggregateAttackerHitRecordsUnsafe(attackerID string, exportDamage map[int64]float64) (total float64, hits, crits int) {
+	for _, targetStat := range a.takenStats {
+		att := targetStat.attackers[attackerID]
+		if att == nil {
+			continue
+		}
+		for _, skillStat := range att.skills {
+			t, h, c, _, _, _, _, _, _ := aggregateHitRecordsWithExport(skillStat.records, exportDamage)
+			total += t
+			hits += h
+			crits += c
+		}
+	}
+	return total, hits, crits
+}
+
+func (a *App) aggregateTargetHitRecordsUnsafe(targetID string, exportDamage map[int64]float64) float64 {
+	targetStat := a.takenStats[targetID]
+	if targetStat == nil {
+		return 0
+	}
+	total := 0.0
+	for _, att := range targetStat.attackers {
+		for _, skillStat := range att.skills {
+			t, _, _, _, _, _, _, _, _ := aggregateHitRecordsWithExport(skillStat.records, exportDamage)
+			total += t
+		}
+	}
+	return total
+}
+
+func (a *App) aggregateAdjustedPCDamageUnsafe(exportDamage map[int64]float64) float64 {
+	total := 0.0
+	for _, targetStat := range a.takenStats {
+		for _, att := range targetStat.attackers {
+			if !att.isPC {
+				continue
+			}
+			for _, skillStat := range att.skills {
+				t, _, _, _, _, _, _, _, _ := aggregateHitRecordsWithExport(skillStat.records, exportDamage)
+				total += t
+			}
+		}
+	}
+	return total
 }
 
 func (a *App) adjustDamageAfterKnownDeathUnsafe(targetIdStr string, damageFloat float64) (float64, float64, bool) {

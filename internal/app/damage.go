@@ -254,37 +254,40 @@ func (a *App) GetDamageByAttacker() []DamageStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
+	exportDamage := a.computeExportDamageBySeqUnsafe()
+	adjustedTotal := a.aggregateAdjustedPCDamageUnsafe(exportDamage)
+
 	result := make([]DamageStats, 0)
 	now := nowCentiseconds()
 	for id, stats := range a.attackerStats {
+		attackerTotal, hits, crits := a.aggregateAttackerHitRecordsUnsafe(id, exportDamage)
+
 		dps := 0.0
-		// 计算状态：根据最后攻击时间判断
 		status := "idle"
 		isActive := now-stats.lastHit < 8*timePrecisionScale
 		if isActive {
 			status = "active"
 		}
 
-		// DPS 计算：active 时使用当前时间（实时刷新），idle 时使用 lastHit（固定值）
 		if isActive && now > stats.firstHit {
-			dps = stats.total / durationSeconds(stats.firstHit, now)
+			dps = attackerTotal / durationSeconds(stats.firstHit, now)
 		} else if stats.lastHit > stats.firstHit {
-			dps = stats.total / durationSeconds(stats.firstHit, stats.lastHit)
+			dps = attackerTotal / durationSeconds(stats.firstHit, stats.lastHit)
 		}
 
 		percent := 0.0
-		if a.totalDamage > 0 {
-			percent = (stats.total / a.totalDamage) * 100
+		if adjustedTotal > 0 {
+			percent = (attackerTotal / adjustedTotal) * 100
 		}
 
 		result = append(result, DamageStats{
 			ID:          id,
 			Name:        a.getEntityNameUnsafe(id),
-			TotalDamage: stats.total,
+			TotalDamage: attackerTotal,
 			DPS:         dps,
 			Percent:     percent,
-			HitCount:    stats.hits,
-			CritCount:   stats.crits,
+			HitCount:    hits,
+			CritCount:   crits,
 			Status:      status,
 		})
 	}
@@ -301,6 +304,9 @@ func (a *App) GetDamageBySkill() []AttackerWithSkills {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
+	exportDamage := a.computeExportDamageBySeqUnsafe()
+	adjustedTotal := a.aggregateAdjustedPCDamageUnsafe(exportDamage)
+
 	result := make([]AttackerWithSkills, 0)
 	now := nowCentiseconds()
 	for attackerId, skillMap := range a.skillStats {
@@ -309,50 +315,44 @@ func (a *App) GetDamageBySkill() []AttackerWithSkills {
 			continue
 		}
 
-		dps := 0.0
-		// 计算状态：根据最后攻击时间判断
+		attackerTotal, _, _ := a.aggregateAttackerHitRecordsUnsafe(attackerId, exportDamage)
+
 		status := "idle"
 		isActive := now-attackerStat.lastHit < 8*timePrecisionScale
 		if isActive {
 			status = "active"
 		}
 
-		// DPS 计算：active 时使用当前时间（实时刷新），idle 时使用 lastHit（固定值）
+		dps := 0.0
 		if isActive && now > attackerStat.firstHit {
-			dps = attackerStat.total / durationSeconds(attackerStat.firstHit, now)
+			dps = attackerTotal / durationSeconds(attackerStat.firstHit, now)
 		} else if attackerStat.lastHit > attackerStat.firstHit {
-			dps = attackerStat.total / durationSeconds(attackerStat.firstHit, attackerStat.lastHit)
+			dps = attackerTotal / durationSeconds(attackerStat.firstHit, attackerStat.lastHit)
 		}
 
 		percent := 0.0
-		if a.totalDamage > 0 {
-			percent = (attackerStat.total / a.totalDamage) * 100
+		if adjustedTotal > 0 {
+			percent = (attackerTotal / adjustedTotal) * 100
 		}
 
-		skills := make([]SkillDamageStats, 0)
-		for skillId, skillStat := range skillMap {
-			skillPercent := 0.0
-			if attackerStat.total > 0 {
-				skillPercent = (skillStat.total / attackerStat.total) * 100
+		mergedSkillRecords := make(map[int][]SkillHitRecord)
+		for _, targetStat := range a.takenStats {
+			att := targetStat.attackers[attackerId]
+			if att == nil {
+				continue
 			}
-			avgDamage := 0.0
-			if skillStat.hits > 0 {
-				avgDamage = skillStat.total / float64(skillStat.hits)
+			for skillID, skillStat := range att.skills {
+				mergedSkillRecords[skillID] = append(mergedSkillRecords[skillID], skillStat.records...)
 			}
+		}
 
-			skills = append(skills, SkillDamageStats{
-				SkillID:       skillId,
-				SkillName:     a.getSkillNameUnsafe(skillId),
-				TotalDamage:   skillStat.total,
-				Percent:       skillPercent,
-				HitCount:      skillStat.hits,
-				CritCount:     skillStat.crits,
-				AvgDamage:     avgDamage,
-				MinDamage:     skillStat.min,
-				MaxDamage:     skillStat.max,
-				CritMinDamage: skillStat.critMin,
-				CritMaxDamage: skillStat.critMax,
-			})
+		skills := make([]SkillDamageStats, 0, len(skillMap))
+		for skillId := range skillMap {
+			records := mergedSkillRecords[skillId]
+			if len(records) == 0 {
+				continue
+			}
+			skills = append(skills, a.buildSkillDamageStatsFromRecordsUnsafe(skillId, records, exportDamage, attackerTotal))
 		}
 
 		sort.Slice(skills, func(i, j int) bool {
@@ -362,7 +362,7 @@ func (a *App) GetDamageBySkill() []AttackerWithSkills {
 		result = append(result, AttackerWithSkills{
 			ID:          attackerId,
 			Name:        a.getEntityNameUnsafe(attackerId),
-			TotalDamage: attackerStat.total,
+			TotalDamage: attackerTotal,
 			DPS:         dps,
 			Percent:     percent,
 			Skills:      skills,
@@ -382,62 +382,46 @@ func (a *App) GetDamageTaken() []TargetDamageStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	// 使用聚合统计数据（不受2000条记录限制）
+	exportDamage := a.computeExportDamageBySeqUnsafe()
+
 	result := make([]TargetDamageStats, 0)
 	now := nowCentiseconds()
 	for targetId, targetStat := range a.takenStats {
+		targetTotal := a.aggregateTargetHitRecordsUnsafe(targetId, exportDamage)
 		attackers := make([]AttackerWithSkills, 0)
 
 		for attackerId, stats := range targetStat.attackers {
-			percent := 0.0
-			if targetStat.total > 0 {
-				percent = (stats.total / targetStat.total) * 100
+			attackerTotal := 0.0
+			for _, skillStat := range stats.skills {
+				t, _, _, _, _, _, _, _, _ := aggregateHitRecordsWithExport(skillStat.records, exportDamage)
+				attackerTotal += t
 			}
 
-			// 计算攻击者状态
+			percent := 0.0
+			if targetTotal > 0 {
+				percent = (attackerTotal / targetTotal) * 100
+			}
+
 			attackerIsActive := now-stats.lastHit < 8*timePrecisionScale
 
-			// 计算该攻击者对该目标的DPS
-			// 根据攻击者状态和目标状态决定使用哪个时间点
 			var endTime int64
 			if attackerIsActive {
-				// 攻击者 active：如果目标已死亡使用死亡时间，否则使用当前时间
 				endTime = now
 				if targetStat.deathTime > 0 {
 					endTime = targetStat.deathTime
 				}
 			} else {
-				// 攻击者 idle：使用攻击者最后攻击时间（固定值）
 				endTime = stats.lastHit
 			}
 
-			attackerDps := stats.total / durationSeconds(targetStat.firstHit, endTime)
+			attackerDps := attackerTotal / durationSeconds(targetStat.firstHit, endTime)
 
-			// 构建技能统计列表
 			skills := make([]SkillDamageStats, 0)
 			for skillId, skillStat := range stats.skills {
-				skillPercent := 0.0
-				if stats.total > 0 {
-					skillPercent = (skillStat.total / stats.total) * 100
+				if len(skillStat.records) == 0 {
+					continue
 				}
-				avgDamage := 0.0
-				if skillStat.hits > 0 {
-					avgDamage = skillStat.total / float64(skillStat.hits)
-				}
-
-				skills = append(skills, SkillDamageStats{
-					SkillID:       skillId,
-					SkillName:     a.getSkillNameUnsafe(skillId),
-					TotalDamage:   skillStat.total,
-					Percent:       skillPercent,
-					HitCount:      skillStat.hits,
-					CritCount:     skillStat.crits,
-					AvgDamage:     avgDamage,
-					MinDamage:     skillStat.min,
-					MaxDamage:     skillStat.max,
-					CritMinDamage: skillStat.critMin,
-					CritMaxDamage: skillStat.critMax,
-				})
+				skills = append(skills, a.buildSkillDamageStatsFromRecordsUnsafe(skillId, skillStat.records, exportDamage, attackerTotal))
 			}
 
 			// 按伤害排序技能
@@ -459,7 +443,7 @@ func (a *App) GetDamageTaken() []TargetDamageStats {
 			attackers = append(attackers, AttackerWithSkills{
 				ID:          attackerId,
 				Name:        formatDisplayName(attackerId, stats.name, stats.raceId, stats.isPC),
-				TotalDamage: stats.total,
+				TotalDamage: attackerTotal,
 				DPS:         attackerDps,
 				Percent:     percent,
 				Skills:      skills,
@@ -501,12 +485,12 @@ func (a *App) GetDamageTaken() []TargetDamageStats {
 		}
 
 		duration := durationSeconds(targetStat.firstHit, endTime)
-		dps := targetStat.total / duration
+		dps := targetTotal / duration
 
 		result = append(result, TargetDamageStats{
 			ID:          targetId,
 			Name:        formatDisplayName(targetId, targetStat.name, targetStat.raceId, targetStat.isPC),
-			TotalDamage: targetStat.total,
+			TotalDamage: targetTotal,
 			DPS:         dps,
 			Duration:    duration,
 			Attackers:   attackers,
