@@ -7,8 +7,8 @@
  * Wails 运行时类型声明
  */
 interface WailsRuntime {
-  EventsOn(eventName: string, callback: (...args: any[]) => void): void
-  EventsOff(eventName: string): void
+  EventsOn(eventName: string, callback: (...args: any[]) => void): () => void
+  EventsOff(eventName: string, ...additionalEventNames: string[]): void
   Quit(): void
 }
 

@@ -17,6 +17,11 @@ import (
 
 var defaultBuffOrder = []uint32{515, 680, 192, 193, 681, 194}
 
+// buffIconNames 指定 Buff 展示时使用的技能图标名称（默认按状态名匹配）
+var buffIconNames = map[uint32]string{
+	515: "状态支援",
+}
+
 // BuffTimer 表示一个buff的定时器
 type BuffTimer struct {
 	CCId        uint32
@@ -269,6 +274,15 @@ func (m *BuffTimerManager) getNotifyThreshold(ccId uint32) int64 {
 	return m.notifyThreshold
 }
 
+func (m *BuffTimerManager) getBuffIcon(ccId uint32) string {
+	if skillName, ok := buffIconNames[ccId]; ok {
+		if icon := db.GetSkillIconByName(skillName); icon != "" {
+			return icon
+		}
+	}
+	return db.GetConditionIcon(int(ccId))
+}
+
 func (m *BuffTimerManager) monitorBuff(ctx context.Context, timer *BuffTimer, buffName string, totalSec int64, ccId uint32) {
 	notifyThreshold := m.getNotifyThreshold(ccId)
 	notifyAfter := totalSec - notifyThreshold
@@ -448,7 +462,7 @@ func (m *BuffTimerManager) GetBuffDisplayList() []BuffDisplayInfo {
 		info := BuffDisplayInfo{
 			CCId:            ccId,
 			BuffName:        m.targetBuffs[ccId],
-			IconData:        db.GetConditionIcon(int(ccId)),
+			IconData:        m.getBuffIcon(ccId),
 			SoundEnabled:    m.soundEnabled[ccId],
 			NotifyThreshold: m.getNotifyThreshold(ccId),
 		}

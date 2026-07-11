@@ -8,6 +8,8 @@ import { constants } from '../../wailsjs/go/models'
 
 const isWailsReady = () => !!window.go?.app?.App && !!window.runtime
 
+const eventUnsubscribers = new Map<string, Map<(...args: any[]) => void, () => void>>()
+
 const previewAttackers: AttackerStats[] = [
   {
     id: '100001',
@@ -509,7 +511,12 @@ export async function setWindowResizable(resizable: boolean): Promise<void> {
  */
 export function onEvent(eventName: string, callback: (...args: any[]) => void): void {
   if (!isWailsReady()) return
-  window.runtime.EventsOn(eventName, callback)
+  const unsubscribe = window.runtime.EventsOn(eventName, callback)
+
+  if (!eventUnsubscribers.has(eventName)) {
+    eventUnsubscribers.set(eventName, new Map())
+  }
+  eventUnsubscribers.get(eventName)!.set(callback, unsubscribe)
 }
 
 /**
@@ -519,10 +526,22 @@ export function onEvent(eventName: string, callback: (...args: any[]) => void): 
  */
 export function offEvent(eventName: string, callback?: (...args: any[]) => void): void {
   if (!isWailsReady()) return
+
+  const callbacks = eventUnsubscribers.get(eventName)
   if (callback) {
-    window.runtime.EventsOff(eventName, callback)
+    const unsubscribe = callbacks?.get(callback)
+    if (unsubscribe) {
+      unsubscribe()
+      callbacks!.delete(callback)
+      if (callbacks!.size === 0) {
+        eventUnsubscribers.delete(eventName)
+      }
+    }
     return
   }
+
+  callbacks?.forEach((unsubscribe) => unsubscribe())
+  eventUnsubscribers.delete(eventName)
   window.runtime.EventsOff(eventName)
 }
 

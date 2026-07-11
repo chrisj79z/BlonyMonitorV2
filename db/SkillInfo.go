@@ -61,3 +61,17 @@ func GetAllSkillIcons() map[int]string {
 	}
 	return result
 }
+
+// GetSkillIconByName 通过技能名称获取图标（base64）
+func GetSkillIconByName(skillName string) string {
+	if skillName == "" {
+		return ""
+	}
+
+	var imageData string
+	err := DB.Get(&imageData, "SELECT ImageData FROM SkillInfo WHERE SkillLocalName = ? LIMIT 1", skillName)
+	if err != nil {
+		return ""
+	}
+	return imageData
+}
